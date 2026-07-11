@@ -1,0 +1,908 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Camera Recording Portal</title>
+
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
+
+  <style>
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      padding: 20px;
+      font-family: Arial, sans-serif;
+      background: #f4f6f8;
+      color: #202124;
+    }
+
+    .container {
+      max-width: 900px;
+      margin: 0 auto;
+      padding: 26px;
+      background: #fff;
+      border-radius: 14px;
+      box-shadow: 0 5px 22px rgba(0,0,0,.10);
+    }
+
+    h1 { margin: 0 0 8px; }
+    .subtitle { color: #5f6368; line-height: 1.5; margin: 0 0 18px; }
+
+    label {
+      display: block;
+      margin: 12px 0 6px;
+      font-weight: 700;
+    }
+
+    input, textarea, button {
+      width: 100%;
+      padding: 12px;
+      border-radius: 7px;
+      font-size: 15px;
+    }
+
+    input, textarea { border: 1px solid #bdc1c6; }
+    textarea { min-height: 74px; resize: vertical; }
+
+    .button-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 10px;
+      margin-top: 15px;
+    }
+
+    button {
+      border: 0;
+      cursor: pointer;
+      font-weight: 700;
+    }
+
+    button:disabled { opacity: .5; cursor: not-allowed; }
+
+    #signInBtn { background: #d2e3fc; }
+    #openBtn { background: #e8f0fe; }
+    #startBtn { background: #ceead6; }
+    #stopBtn { background: #fce8e6; }
+
+    video {
+      width: 100%;
+      min-height: 390px;
+      margin-top: 18px;
+      background: #000;
+      border-radius: 10px;
+    }
+
+    .record-row {
+      display: flex;
+      justify-content: space-between;
+      margin-top: 10px;
+      font-weight: 700;
+    }
+
+    #recordBadge { display: none; color: #b00020; }
+
+    #status {
+      margin-top: 15px;
+      padding: 13px;
+      border-radius: 8px;
+      background: #f1f3f4;
+      white-space: pre-line;
+      font-weight: 700;
+    }
+
+    .success { color: #137333; }
+    .error { color: #b00020; }
+    .progress { color: #174ea6; }
+
+    .result-links {
+      margin-top: 10px;
+    }
+
+    .result-links a {
+      display: inline-block;
+      margin: 6px 8px 0 0;
+      padding: 9px 12px;
+      border-radius: 6px;
+      background: #e8f0fe;
+      color: #174ea6;
+      text-decoration: none;
+      font-weight: 700;
+    }
+
+    .note {
+      margin-top: 12px;
+      color: #5f6368;
+      font-size: 13px;
+      line-height: 1.55;
+    }
+
+    details {
+      margin-top: 14px;
+      border: 1px solid #dadce0;
+      border-radius: 8px;
+      padding: 10px;
+    }
+
+    pre {
+      white-space: pre-wrap;
+      word-break: break-word;
+      max-height: 250px;
+      overflow: auto;
+      background: #111;
+      color: #f1f3f4;
+      padding: 12px;
+      border-radius: 6px;
+    }
+
+    @media (max-width: 760px) {
+      body { padding: 10px; }
+      .container { padding: 17px; }
+      .button-grid { grid-template-columns: 1fr; }
+      video { min-height: 260px; }
+    }
+  </style>
+</head>
+
+<body>
+  <main class="container">
+    <h1>Camera Recording Portal</h1>
+
+    <p class="subtitle">
+      Silent camera recording uploaded directly from this browser to Google Drive.
+      The Drive link is then written directly to Google Sheets.
+    </p>
+
+    <label for="uniqueCode">Unique Code *</label>
+    <input id="uniqueCode" type="text" placeholder="Example: GWD1234567" maxlength="100">
+
+    <label for="operatorName">Operator Name / Employee Code *</label>
+    <input id="operatorName" type="text" placeholder="Example: Dikshant / EMP12345" maxlength="150">
+
+    <label for="remarks">Remarks</label>
+    <textarea id="remarks" placeholder="Optional remarks" maxlength="500"></textarea>
+
+    <div class="button-grid">
+      <button id="signInBtn" type="button" onclick="authorizeGoogle()">
+        1. Sign in to Google
+      </button>
+
+      <button id="openBtn" type="button" onclick="openCamera()" disabled>
+        2. Open Camera
+      </button>
+
+      <button id="startBtn" type="button" onclick="startRecording()" disabled>
+        3. Start Recording
+      </button>
+
+      <button id="stopBtn" type="button" onclick="stopAndUpload()" disabled>
+        4. Stop & Upload
+      </button>
+    </div>
+
+    <video id="preview" autoplay muted playsinline></video>
+
+    <div class="record-row">
+      <span id="recordBadge">● RECORDING — VIDEO ONLY</span>
+      <span id="timer">00:00 / 00:20</span>
+    </div>
+
+    <div id="status">
+      Add the Google OAuth Client ID in this project's index.html, deploy to Cloudflare Pages,
+      then sign in with an account that can edit the target Drive folder and Google Sheet.
+    </div>
+
+    <div id="resultLinks" class="result-links"></div>
+
+    <p class="note">
+      Maximum recording duration: 20 seconds. Microphone is disabled.
+      Recommended target size: under 3 MB per recording.
+    </p>
+
+    <details>
+      <summary>Diagnostics</summary>
+      <pre id="diagnostics">No diagnostic information yet.</pre>
+    </details>
+  </main>
+
+  <script>
+    // ================================================================
+    // REQUIRED: Replace this with the Web OAuth Client ID created in
+    // Google Cloud Console. Do not add a client secret to this file.
+    // ================================================================
+    const GOOGLE_CLIENT_ID =
+      "PASTE_GOOGLE_WEB_OAUTH_CLIENT_ID.apps.googleusercontent.com";
+
+    const ROOT_FOLDER_ID = "1tqmYZ34LTD98sg-ngXRCuGN7lONTB7A0";
+    const SPREADSHEET_ID = "11eoGFmJ_MU7-iCB8C3-QdWp5602K4gDF_vQwp0qChxw";
+    const SHEET_RANGE = "Recording_Log!A:K";
+
+    const GOOGLE_SCOPES = [
+      "https://www.googleapis.com/auth/drive",
+      "https://www.googleapis.com/auth/spreadsheets"
+    ].join(" ");
+
+    const MAX_SECONDS = 20;
+    const MAX_VIDEO_BYTES = 4 * 1024 * 1024;
+
+    let tokenClient = null;
+    let accessToken = "";
+    let tokenExpiresAt = 0;
+
+    let cameraStream = null;
+    let mediaRecorder = null;
+    let recordedChunks = [];
+    let startedAt = 0;
+    let timerHandle = null;
+    let autoStopHandle = null;
+
+    const uniqueCodeInput = document.getElementById("uniqueCode");
+    const operatorInput = document.getElementById("operatorName");
+    const remarksInput = document.getElementById("remarks");
+    const signInBtn = document.getElementById("signInBtn");
+    const openBtn = document.getElementById("openBtn");
+    const startBtn = document.getElementById("startBtn");
+    const stopBtn = document.getElementById("stopBtn");
+    const preview = document.getElementById("preview");
+    const recordBadge = document.getElementById("recordBadge");
+    const timerBox = document.getElementById("timer");
+    const statusBox = document.getElementById("status");
+    const resultLinks = document.getElementById("resultLinks");
+    const diagnosticsBox = document.getElementById("diagnostics");
+
+    const diagnosticLines = [];
+
+    function setStatus(message, type = "") {
+      statusBox.textContent = message;
+      statusBox.className = type;
+    }
+
+    function logDiagnostic(label, value) {
+      diagnosticLines.push(label + ": " + String(value));
+      diagnosticsBox.textContent = diagnosticLines.join("\n");
+    }
+
+    function safeCode(value) {
+      return String(value || "")
+        .trim()
+        .replace(/[^a-zA-Z0-9._-]/g, "_")
+        .substring(0, 100);
+    }
+
+    function validateConfiguration() {
+      if (
+        !GOOGLE_CLIENT_ID ||
+        GOOGLE_CLIENT_ID.includes("PASTE_GOOGLE_WEB_OAUTH_CLIENT_ID")
+      ) {
+        setStatus(
+          "Google OAuth Client ID is not configured in index.html.",
+          "error"
+        );
+        return false;
+      }
+
+      return true;
+    }
+
+    function initializeGoogleClient() {
+      if (!validateConfiguration()) return false;
+
+      if (!window.google || !google.accounts || !google.accounts.oauth2) {
+        setStatus(
+          "Google Identity library is still loading. Wait a few seconds and try again.",
+          "error"
+        );
+        return false;
+      }
+
+      if (!tokenClient) {
+        tokenClient = google.accounts.oauth2.initTokenClient({
+          client_id: GOOGLE_CLIENT_ID,
+          scope: GOOGLE_SCOPES,
+          callback: handleTokenResponse
+        });
+      }
+
+      return true;
+    }
+
+    function authorizeGoogle() {
+      if (!initializeGoogleClient()) return;
+
+      setStatus(
+        "Opening Google account authorization...",
+        "progress"
+      );
+
+      tokenClient.requestAccessToken({
+        prompt: accessToken ? "" : "consent"
+      });
+    }
+
+    function handleTokenResponse(response) {
+      if (!response || response.error || !response.access_token) {
+        const message =
+          response && response.error
+            ? response.error
+            : "Google did not return an access token.";
+
+        logDiagnostic("Google Authorization Error", message);
+        setStatus("Google authorization failed: " + message, "error");
+        return;
+      }
+
+      accessToken = response.access_token;
+      tokenExpiresAt =
+        Date.now() + Math.max(60, Number(response.expires_in || 3600) - 60) * 1000;
+
+      signInBtn.textContent = "Google Connected";
+      openBtn.disabled = false;
+
+      logDiagnostic("Google Authorization", "SUCCESS");
+      logDiagnostic("Token Expires In", response.expires_in || "unknown");
+
+      setStatus(
+        "Google connected successfully. Enter the details and open the camera.",
+        "success"
+      );
+    }
+
+    function hasValidToken() {
+      return Boolean(accessToken) && Date.now() < tokenExpiresAt;
+    }
+
+    async function ensureToken() {
+      if (hasValidToken()) return accessToken;
+
+      throw new Error(
+        "Google authorization expired. Click Sign in to Google again, then retry."
+      );
+    }
+
+    async function openCamera() {
+      const uniqueCode = safeCode(uniqueCodeInput.value);
+      const operatorName = operatorInput.value.trim();
+
+      if (!uniqueCode) {
+        setStatus("Please enter the unique code first.", "error");
+        uniqueCodeInput.focus();
+        return;
+      }
+
+      if (!operatorName) {
+        setStatus("Please enter the operator name or employee code.", "error");
+        operatorInput.focus();
+        return;
+      }
+
+      if (!hasValidToken()) {
+        setStatus("Sign in to Google first.", "error");
+        return;
+      }
+
+      try {
+        setStatus("Opening camera...", "progress");
+
+        if (cameraStream) {
+          cameraStream.getTracks().forEach(track => track.stop());
+        }
+
+        cameraStream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            width: { ideal: 1280 },
+            height: { ideal: 720 }
+          },
+          audio: false
+        });
+
+        preview.srcObject = cameraStream;
+        await preview.play();
+
+        const track = cameraStream.getVideoTracks()[0];
+
+        logDiagnostic("Camera Open", "SUCCESS");
+        logDiagnostic("Camera Label", track ? track.label : "unknown");
+        logDiagnostic(
+          "Camera Settings",
+          track && track.getSettings
+            ? JSON.stringify(track.getSettings())
+            : "unavailable"
+        );
+
+        startBtn.disabled = false;
+        stopBtn.disabled = true;
+
+        setStatus(
+          "Camera opened successfully. Click Start Recording.",
+          "success"
+        );
+
+      } catch (error) {
+        logDiagnostic(
+          "Camera Error",
+          (error.name || "Error") + " - " + (error.message || String(error))
+        );
+
+        setStatus(
+          "Camera could not open.\n" +
+          (error.name || "Error") + ": " +
+          (error.message || String(error)),
+          "error"
+        );
+      }
+    }
+
+    function chooseMimeType() {
+      const types = [
+        "video/webm;codecs=vp8",
+        "video/webm;codecs=vp9",
+        "video/webm"
+      ];
+
+      return types.find(type => MediaRecorder.isTypeSupported(type)) || "";
+    }
+
+    function startRecording() {
+      if (!cameraStream) {
+        setStatus("Open the camera first.", "error");
+        return;
+      }
+
+      try {
+        recordedChunks = [];
+
+        const mimeType = chooseMimeType();
+        const options = {
+          videoBitsPerSecond: 650000
+        };
+
+        if (mimeType) options.mimeType = mimeType;
+
+        mediaRecorder = new MediaRecorder(cameraStream, options);
+
+        mediaRecorder.ondataavailable = event => {
+          if (event.data && event.data.size > 0) {
+            recordedChunks.push(event.data);
+          }
+        };
+
+        mediaRecorder.onstop = uploadRecording;
+
+        mediaRecorder.onerror = event => {
+          const error =
+            event.error || new Error("Unknown recording error.");
+
+          logDiagnostic(
+            "MediaRecorder Error",
+            error.message || String(error)
+          );
+
+          setStatus(
+            "Recording error: " +
+            (error.message || String(error)),
+            "error"
+          );
+
+          restoreControls();
+        };
+
+        mediaRecorder.start(1000);
+        startedAt = Date.now();
+
+        lockControls();
+        recordBadge.style.display = "inline";
+
+        timerHandle = setInterval(updateTimer, 250);
+        autoStopHandle = setTimeout(() => {
+          if (mediaRecorder && mediaRecorder.state === "recording") {
+            stopAndUpload();
+          }
+        }, MAX_SECONDS * 1000);
+
+        setStatus(
+          "Recording started. It will stop automatically after 20 seconds.",
+          "success"
+        );
+
+      } catch (error) {
+        setStatus(
+          "Recording could not start: " +
+          (error.message || String(error)),
+          "error"
+        );
+        restoreControls();
+      }
+    }
+
+    function updateTimer() {
+      const elapsed = Math.min(
+        MAX_SECONDS,
+        Math.floor((Date.now() - startedAt) / 1000)
+      );
+
+      timerBox.textContent =
+        "00:" + String(elapsed).padStart(2, "0") + " / 00:20";
+    }
+
+    function stopAndUpload() {
+      if (!mediaRecorder || mediaRecorder.state !== "recording") {
+        setStatus("Recording is not active.", "error");
+        return;
+      }
+
+      clearTimers();
+      stopBtn.disabled = true;
+      recordBadge.style.display = "none";
+
+      setStatus(
+        "Stopping recording and starting direct Google Drive upload...",
+        "progress"
+      );
+
+      mediaRecorder.stop();
+    }
+
+    function clearTimers() {
+      if (timerHandle) clearInterval(timerHandle);
+      if (autoStopHandle) clearTimeout(autoStopHandle);
+
+      timerHandle = null;
+      autoStopHandle = null;
+      updateTimer();
+    }
+
+    async function uploadRecording() {
+      try {
+        const token = await ensureToken();
+        const uniqueCode = safeCode(uniqueCodeInput.value);
+        const operatorName = operatorInput.value.trim();
+        const remarks = remarksInput.value.trim();
+
+        const durationSeconds = Math.min(
+          MAX_SECONDS,
+          Math.max(1, Math.round((Date.now() - startedAt) / 1000))
+        );
+
+        const mimeType =
+          mediaRecorder.mimeType || "video/webm";
+
+        const videoBlob = new Blob(
+          recordedChunks,
+          { type: mimeType }
+        );
+
+        if (!videoBlob.size) {
+          throw new Error("The recorded video is empty.");
+        }
+
+        if (videoBlob.size > MAX_VIDEO_BYTES) {
+          throw new Error(
+            "Recording is " +
+            (videoBlob.size / 1024 / 1024).toFixed(2) +
+            " MB. Keep the recording shorter than 20 seconds."
+          );
+        }
+
+        setStatus(
+          "Uploading " +
+          (videoBlob.size / 1024 / 1024).toFixed(2) +
+          " MB directly to Google Drive...",
+          "progress"
+        );
+
+        const codeFolderId = await findOrCreateCodeFolder(
+          token,
+          uniqueCode
+        );
+
+        const now = new Date();
+        const fileName =
+          uniqueCode + "_" +
+          formatTimestamp(now) +
+          ".webm";
+
+        const driveFile = await uploadMultipartFile(
+          token,
+          videoBlob,
+          fileName,
+          mimeType,
+          codeFolderId
+        );
+
+        const fileUrl =
+          "https://drive.google.com/file/d/" +
+          driveFile.id +
+          "/view";
+
+        const folderUrl =
+          "https://drive.google.com/drive/folders/" +
+          codeFolderId;
+
+        await appendSheetLog(token, [
+          now.toISOString(),
+          uniqueCode,
+          operatorName,
+          remarks,
+          fileName,
+          fileUrl,
+          codeFolderId,
+          videoBlob.size,
+          durationSeconds,
+          navigator.userAgent,
+          "Saved"
+        ]);
+
+        resultLinks.innerHTML =
+          "<a href='" + encodeURI(fileUrl) +
+          "' target='_blank' rel='noopener'>Open Recording</a>" +
+          "<a href='" + encodeURI(folderUrl) +
+          "' target='_blank' rel='noopener'>Open Code Folder</a>";
+
+        logDiagnostic("Upload", "SUCCESS");
+        logDiagnostic("Drive File ID", driveFile.id);
+        logDiagnostic("File Size", videoBlob.size);
+
+        setStatus(
+          "Recording saved successfully and Google Sheet updated.",
+          "success"
+        );
+
+        recordedChunks = [];
+        restoreControls();
+
+      } catch (error) {
+        logDiagnostic(
+          "Upload Error",
+          error.message || String(error)
+        );
+
+        setStatus(
+          "Upload failed.\n" +
+          (error.message || String(error)),
+          "error"
+        );
+
+        restoreControls();
+      }
+    }
+
+    async function findOrCreateCodeFolder(token, uniqueCode) {
+      const cacheKey = "driveFolder:" + uniqueCode;
+      const cachedFolderId = localStorage.getItem(cacheKey);
+
+      if (cachedFolderId) return cachedFolderId;
+
+      const escapedName = uniqueCode.replace(/'/g, "\\'");
+
+      const query = [
+        "'" + ROOT_FOLDER_ID + "' in parents",
+        "name = '" + escapedName + "'",
+        "mimeType = 'application/vnd.google-apps.folder'",
+        "trashed = false"
+      ].join(" and ");
+
+      const listUrl =
+        "https://www.googleapis.com/drive/v3/files" +
+        "?q=" + encodeURIComponent(query) +
+        "&fields=files(id,name)" +
+        "&pageSize=1" +
+        "&supportsAllDrives=true" +
+        "&includeItemsFromAllDrives=true";
+
+      const listResponse = await googleFetch(
+        listUrl,
+        { method: "GET" },
+        token
+      );
+
+      if (
+        listResponse.files &&
+        listResponse.files.length
+      ) {
+        const id = listResponse.files[0].id;
+        localStorage.setItem(cacheKey, id);
+        return id;
+      }
+
+      const createResponse = await googleFetch(
+        "https://www.googleapis.com/drive/v3/files?supportsAllDrives=true",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            name: uniqueCode,
+            mimeType: "application/vnd.google-apps.folder",
+            parents: [ROOT_FOLDER_ID]
+          })
+        },
+        token
+      );
+
+      localStorage.setItem(cacheKey, createResponse.id);
+      return createResponse.id;
+    }
+
+    async function uploadMultipartFile(
+      token,
+      blob,
+      fileName,
+      mimeType,
+      parentId
+    ) {
+      const boundary =
+        "-------camera_portal_" +
+        Math.random().toString(36).slice(2);
+
+      const metadata = {
+        name: fileName,
+        mimeType: mimeType,
+        parents: [parentId]
+      };
+
+      const multipartBody = new Blob([
+        "--" + boundary + "\r\n",
+        "Content-Type: application/json; charset=UTF-8\r\n\r\n",
+        JSON.stringify(metadata),
+        "\r\n--" + boundary + "\r\n",
+        "Content-Type: " + mimeType + "\r\n\r\n",
+        blob,
+        "\r\n--" + boundary + "--"
+      ], {
+        type: "multipart/related; boundary=" + boundary
+      });
+
+      return googleFetch(
+        "https://www.googleapis.com/upload/drive/v3/files" +
+        "?uploadType=multipart" +
+        "&supportsAllDrives=true" +
+        "&fields=id,name,mimeType,size",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type":
+              "multipart/related; boundary=" + boundary
+          },
+          body: multipartBody
+        },
+        token
+      );
+    }
+
+    async function appendSheetLog(token, row) {
+      const range = encodeURIComponent(SHEET_RANGE);
+
+      return googleFetch(
+        "https://sheets.googleapis.com/v4/spreadsheets/" +
+        SPREADSHEET_ID +
+        "/values/" +
+        range +
+        ":append" +
+        "?valueInputOption=USER_ENTERED" +
+        "&insertDataOption=INSERT_ROWS",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            values: [row]
+          })
+        },
+        token
+      );
+    }
+
+    async function googleFetch(url, options, token, attempt = 0) {
+      const request = Object.assign({}, options);
+      request.headers = Object.assign({}, options.headers || {}, {
+        "Authorization": "Bearer " + token
+      });
+
+      const response = await fetch(url, request);
+
+      if (
+        (response.status === 429 || response.status >= 500) &&
+        attempt < 4
+      ) {
+        const waitMs =
+          Math.min(16000, Math.pow(2, attempt) * 1000) +
+          Math.floor(Math.random() * 500);
+
+        await new Promise(resolve => setTimeout(resolve, waitMs));
+
+        return googleFetch(
+          url,
+          options,
+          token,
+          attempt + 1
+        );
+      }
+
+      let data = null;
+      const text = await response.text();
+
+      if (text) {
+        try {
+          data = JSON.parse(text);
+        } catch (_) {
+          data = { raw: text };
+        }
+      }
+
+      if (!response.ok) {
+        const message =
+          data &&
+          data.error &&
+          data.error.message
+            ? data.error.message
+            : "Google API request failed with HTTP " +
+              response.status;
+
+        throw new Error(message);
+      }
+
+      return data || {};
+    }
+
+    function formatTimestamp(date) {
+      const pad = value => String(value).padStart(2, "0");
+
+      return (
+        date.getFullYear() + "-" +
+        pad(date.getMonth() + 1) + "-" +
+        pad(date.getDate()) + "_" +
+        pad(date.getHours()) + "-" +
+        pad(date.getMinutes()) + "-" +
+        pad(date.getSeconds())
+      );
+    }
+
+    function lockControls() {
+      uniqueCodeInput.disabled = true;
+      operatorInput.disabled = true;
+      remarksInput.disabled = true;
+      signInBtn.disabled = true;
+      openBtn.disabled = true;
+      startBtn.disabled = true;
+      stopBtn.disabled = false;
+      resultLinks.innerHTML = "";
+    }
+
+    function restoreControls() {
+      uniqueCodeInput.disabled = false;
+      operatorInput.disabled = false;
+      remarksInput.disabled = false;
+      signInBtn.disabled = false;
+      openBtn.disabled = !hasValidToken();
+      startBtn.disabled = !cameraStream;
+      stopBtn.disabled = true;
+      recordBadge.style.display = "none";
+    }
+
+    window.addEventListener("load", () => {
+      logDiagnostic("Secure Context", window.isSecureContext);
+      logDiagnostic("Top-level Page", window.top === window.self);
+      logDiagnostic(
+        "Camera API Available",
+        Boolean(
+          navigator.mediaDevices &&
+          navigator.mediaDevices.getUserMedia
+        )
+      );
+
+      validateConfiguration();
+    });
+
+    window.addEventListener("beforeunload", () => {
+      clearTimers();
+
+      if (cameraStream) {
+        cameraStream.getTracks().forEach(track => track.stop());
+      }
+    });
+  </script>
+</body>
+</html>
